@@ -9,11 +9,17 @@
 #       is the end of the manifest check. If DST_DIR/canary/beats.log
 #       exists and nas-backup-drill is reachable, RPO comes from its
 #       share-canary.sh verify (CANARY_KIND=frozen).
-#   offload-drill.sh lock-test REMOTE:BUCKET/PREFIX/OBJECT [--label TEXT]
-#       tries to delete one object with the upload identity. PASS means
-#       the provider REFUSED. The refusal text is the evidence.
-#   offload-drill.sh latency   REMOTE:BUCKET/PREFIX/OBJECT [--label TEXT]
-#       time to first byte of one object (Archive and Coldline reads)
+#   offload-drill.sh lock-test REMOTE:BUCKET/PREFIX/OBJECT [--label TEXT] [--gs gs://BUCKET/OBJECT]
+#       tries to delete one object with the remote's identity. PASS means
+#       the data survived: the delete was refused, or on a versioned
+#       bucket the object only became noncurrent and is still kept.
+#       With --gs, gcloud (whoever it is logged in as) also tries to
+#       delete one generation outright, which is what a retention policy
+#       really has to refuse, and gcloud decides whether data survived.
+#       The refusal texts are the evidence.
+#   offload-drill.sh latency   REMOTE:BUCKET/PREFIX/OBJECT [--label TEXT] [--repeat N]
+#       time to first byte of one object (Archive and Coldline reads),
+#       median of N reads (default 5)
 #
 # Remotes are rclone remotes (rclone config): gcs: with the HMAC key on
 # the S3 backend, or the native backend; linode: on the S3 backend.
@@ -23,6 +29,7 @@ set -eu
 OUT=${OUT:-drills.jsonl}
 NBD=${NBD:-$(dirname "$0")/../nas-backup-drill}
 RCLONE=${RCLONE:-rclone}
+GCLOUD=${GCLOUD:-gcloud}
 
 die() { printf 'offload-drill: %s\n' "$*" >&2; exit 1; }
 now() { date -u +%s; }
@@ -35,14 +42,19 @@ hasher() {
 
 remote_bytes() { "$RCLONE" size --json "$1" 2>/dev/null | sed -n 's/.*"bytes":\([0-9]*\).*/\1/p'; }
 mib() { echo $(( ${1:-0} / 1048576 )); }
+# rate MIB SECONDS -> "12.3 MiB/s"
+rate() { awk -v m="$1" -v s="$2" 'BEGIN { printf "%.1f MiB/s", m / s }'; }
+oneline() { tr -d '\n|"' | tail -c "${1:-160}"; }
 
-label=; failed_at=; manifest=
+label=; failed_at=; manifest=; gs=; repeat=5
 parse_opts() {
   while [ $# -gt 0 ]; do
     case "$1" in
       --label) label=$2; shift 2 ;;
       --failed-at) failed_at=$2; shift 2 ;;
       --manifest) manifest=$2; shift 2 ;;
+      --gs) gs=$2; shift 2 ;;
+      --repeat) repeat=$2; shift 2 ;;
       *) die "unknown option $1" ;;
     esac
   done
@@ -64,7 +76,7 @@ cmd_upload() {
   "$RCLONE" sync "$src" "$dst" --stats-one-line --stats=30s --transfers=8 --checkers=8 >&2
   t1=$(now)
   b=$(remote_bytes "$dst"); s=$((t1 - t0)); [ "$s" -gt 0 ] || s=1
-  row "$t0" "${label:-upload}" "$dst" "$(mib "$b")" "$s" "$(( $(mib "$b") / s )) MiB/s" "-" "OK" "rclone sync, transfers=8"
+  row "$t0" "${label:-upload}" "$dst" "$(mib "$b")" "$s" "$(rate "$(mib "$b")" "$s")" "-" "OK" "rclone sync, transfers=8"
 }
 
 cmd_restore() {
@@ -91,20 +103,37 @@ cmd_restore() {
   fi
   kb=$(du -sk "$dst" | cut -f1); m=$((kb / 1024))
   if [ "$missing" -eq 0 ] && [ "$bad" -eq 0 ]; then res=OK; code=0; else res=FAIL; code=4; fi
-  row "$t0" "${label:-restore}" "$src" "$m" "$s" "$(( m / s )) MiB/s" "$rpo" "$res" "copy ${t_copy}s, manifest ok=$ok missing=$missing mismatch=$bad"
+  row "$t0" "${label:-restore}" "$src" "$m" "$s" "$(rate "$m" "$s")" "$rpo" "$res" "copy ${t_copy}s, manifest ok=$ok missing=$missing mismatch=$bad"
   exit "$code"
 }
+
+# gens URI: generations of one GCS object, live and noncurrent
+gens() { "$GCLOUD" storage ls -a "$1" 2>/dev/null | sed -n 's/.*#\([0-9][0-9]*\)$/\1/p'; }
 
 cmd_lock_test() {
   obj=$1; shift; parse_opts "$@"
   t0=$(now)
+  if [ -n "$gs" ]; then before=$(gens "$gs"); [ -n "$before" ] || die "no generations at $gs"; fi
   err=$("$RCLONE" deletefile "$obj" 2>&1 >/dev/null) && rc=0 || rc=$?
-  if [ "$rc" -ne 0 ] && "$RCLONE" lsf "$obj" >/dev/null 2>&1; then
-    res=OK; note="delete refused: $(printf '%s' "$err" | tr -d '\n|' | tail -c 160)"
-  elif [ "$rc" -eq 0 ] && "$RCLONE" lsf "$obj" >/dev/null 2>&1; then
-    res=OK; note="delete returned 0 but a current version is still readable (delete marker on a versioned bucket)"
+  if [ "$rc" -ne 0 ]; then a="delete refused: $(printf '%s' "$err" | oneline)"
+  else a="delete returned 0"; fi
+  if [ -n "$gs" ]; then
+    g=$(printf '%s\n' "$before" | head -n 1)
+    gerr=$("$GCLOUD" storage rm "$gs#$g" 2>&1 >/dev/null) && grc=0 || grc=$?
+    if [ "$grc" -ne 0 ]; then b="gen $g delete refused: $(printf '%s' "$gerr" | oneline)"
+    else b="gen $g delete returned 0"; fi
+    after=$(gens "$gs")
+    if printf '%s\n' "$after" | grep -qx "$g" && [ "$(printf '%s\n' "$after" | wc -l)" -ge "$(printf '%s\n' "$before" | wc -l)" ]; then
+      res=OK; note="$a; $b; all $(printf '%s\n' "$after" | wc -l | tr -d ' ') generations kept"
+    else
+      res=FAIL; note="$a; $b; generations before: $(printf '%s' "$before" | tr '\n' ' ')after: $(printf '%s' "$after" | tr '\n' ' ')"
+    fi
+  elif "$RCLONE" lsf "$obj" >/dev/null 2>&1; then
+    res=OK; note="$a; current version still readable"
+  elif "$RCLONE" lsf --s3-versions "${obj%/*}" 2>/dev/null | grep -q "^${obj##*/}-v"; then
+    res=OK; note="$a; current is gone but a noncurrent version is kept"
   else
-    res=FAIL; note="object is gone: the identity can delete, or retention is not in force"
+    res=FAIL; note="$a; object is gone: the identity can delete, or retention is not in force"
   fi
   row "$t0" "${label:-lock-test}" "$obj" "0" "$(( $(now) - t0 ))" "-" "-" "$res" "$note"
   [ "$res" = OK ]
@@ -112,15 +141,20 @@ cmd_lock_test() {
 
 cmd_latency() {
   obj=$1; shift; parse_opts "$@"
-  t0=$(now)
-  start=$(date +%s%N 2>/dev/null || echo "${t0}000000000")
-  "$RCLONE" cat "$obj" --count 1 >/dev/null
-  end=$(date +%s%N 2>/dev/null || echo "$(now)000000000")
-  ms=$(( (end - start) / 1000000 ))
-  row "$t0" "${label:-latency}" "$obj" "0" "$(( $(now) - t0 ))" "-" "-" "OK" "first byte ${ms} ms"
+  t0=$(now); all=
+  i=0
+  while [ "$i" -lt "$repeat" ]; do
+    start=$(date +%s%N)
+    "$RCLONE" cat "$obj" --count 1 >/dev/null
+    end=$(date +%s%N)
+    all="$all $(( (end - start) / 1000000 ))"
+    i=$((i + 1))
+  done
+  med=$(echo "$all" | tr ' ' '\n' | sed '/^$/d' | sort -n | awk '{ v[NR] = $1 } END { print (NR % 2) ? v[(NR + 1) / 2] : int((v[NR / 2] + v[NR / 2 + 1]) / 2) }')
+  row "$t0" "${label:-latency}" "$obj" "0" "$(( $(now) - t0 ))" "-" "-" "OK" "first byte median ${med} ms of ${repeat} (${all# })"
 }
 
-[ $# -ge 2 ] || { sed -n '2,22p' "$0"; exit 1; }
+[ $# -ge 2 ] || { sed -n '2,29p' "$0"; exit 1; }
 cmd=$1; shift
 case "$cmd" in
   upload)    [ $# -ge 2 ] || die "upload SRC_DIR REMOTE:PATH"; cmd_upload "$@" ;;
