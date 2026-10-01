@@ -69,12 +69,13 @@ S3_ENDPOINT=https://jp-tyo-1.linodeobjects.com \
 
 `gcs:`、`gcs-owner:`、`linode:` 是 rclone 的遠端名稱。`gcs:` 用 HMAC 金鑰走 S3 後端（`provider = GCS`，endpoint `https://storage.googleapis.com`），`gcs-owner:` 是原生 gcs 後端，權杖由 `RCLONE_GCS_ACCESS_TOKEN` 帶入，不落地。
 
-## 實測後才知道的四件事
+## 實測後才知道的五件事
 
 1. **上傳身分不能沒有 `storage.objects.delete`。** GCS 覆寫既有物件需要 delete 權限，開了版本也一樣，沒有它 PutObject 回 403，同步工具遇到變過的檔案就失敗。給了 delete 也安全：刪現行版本只會讓它變成 noncurrent，刪任何一個未滿保留期的 generation 都回 `403 RetentionPolicyNotMet`，上傳身分與專案 Owner 都一樣。保護的時間窗就是保留期。
 2. **HBS 3 的 Google Cloud Storage 連接器不收 HMAC**，只有 OAuth、P12 與 JSON 金鑰。要共用 HMAC 得選「S3 相容」，而 HBS 3 建帳戶時用 ListBuckets 驗證，上傳身分要另外在專案層級拿到 `storage.buckets.list`（`gcs-bucket.sh lister`），否則回 `cloud_unauthorized`。
 3. **GCS 經 S3 相容端點列得出舊版，讀不出來。** 回應裡沒有 VersionId，rclone 的 `--s3-versions` 能列名稱，取檔時回 object not found。回復 noncurrent 版本要用 `gcloud storage cp gs://BUCKET/KEY#GENERATION`。S3 Object Lock（Linode）用 rclone `--s3-versions` 就能取回。
 4. **`rclone lsf` 對不存在的檔案也回 0。** `lock-test` 判斷物件還在不在，看的是輸出而不是結束碼。
+5. **稀疏檔會被整個傳上去。** HDP_Business 的 VM 磁碟映像在 ZFS 上用 262 GiB，表面大小 901 GiB，rclone 照傳，上傳 4.4 小時、費用乘上 3.4。HBS 3 的雲端同步也沒有稀疏檔偵測。上傳前先比 `du` 與 `du --apparent-size`。
 
 ## 結束碼
 
