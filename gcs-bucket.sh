@@ -38,7 +38,7 @@ cmd_create() {
     --retention-period="$retention"
   gcloud storage buckets update "gs://$bucket" --versioning
   # soft delete keeps deleted objects (and bills them) for 7 days by default;
-  # retention plus versioning already cover that, so turn it off (待測: billing effect)
+  # retention plus versioning already cover that, so turn it off (check the billing effect on the first invoice)
   gcloud storage buckets update "gs://$bucket" --soft-delete-duration=0
   gcloud storage buckets update "gs://$bucket" --lifecycle-file="$HERE/iam/gcs-lifecycle.json"
   printf 'created gs://%s in %s, retention %s (unlocked), versioning on, lifecycle set\n' "$bucket" "$region" "$retention"
