@@ -6,22 +6,23 @@
 #   s3-bucket.sh show   BUCKET          # versioning, object lock, lifecycle, as evidence
 #
 # Environment
-#   S3_ENDPOINT   https://jp-osa-1.linodeobjects.com (default)
+#   S3_ENDPOINT   https://jp-tyo-1.linodeobjects.com (default, Tokyo 3)
 #   AWS_PROFILE or AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY for the aws CLI
 #
 # Object Lock must be enabled when the bucket is created; it cannot be
 # turned on later. Default retention in COMPLIANCE mode: nobody, not
 # even the account owner, can delete a locked version before it expires.
-# DAYS defaults to 7 for the drill. Linode: Object Lock is listed as
-# supported in the official docs; behaviour of default retention and
-# bucket-scoped keys is 待測 on this account.
-# https://techdocs.akamai.com/cloud-computing/docs/object-storage-pricing
+# DAYS defaults to 7 for the drill. Measured on Linode jp-tyo-1
+# (2026-10-02): new objects get COMPLIANCE retention from the bucket
+# default, a plain delete only adds a delete marker, and deleting the
+# version itself is refused with "AccessDenied: forbidden by object lock"
+# even with a read/write key for all buckets.
 #
 # Needs the aws CLI. POSIX sh.
 set -eu
 
 HERE=$(cd "$(dirname "$0")" && pwd)
-EP=${S3_ENDPOINT:-https://jp-osa-1.linodeobjects.com}
+EP=${S3_ENDPOINT:-https://jp-tyo-1.linodeobjects.com}
 die() { printf 's3-bucket: %s\n' "$*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "$1 not found"; }
 s3() { aws --endpoint-url "$EP" s3api "$@"; }
