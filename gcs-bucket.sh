@@ -3,7 +3,8 @@
 # Storage, then the least-privilege identity the NAS uploads with.
 #
 #   gcs-bucket.sh create  PROJECT BUCKET [REGION] [RETENTION]   # bucket, versioning, retention, lifecycle, no public access
-#   gcs-bucket.sh sa      PROJECT BUCKET SA_NAME                 # service account + custom role (create/get/list, no delete)
+#   gcs-bucket.sh sa      PROJECT BUCKET SA_NAME                 # service account + custom role bound on the bucket only
+#   gcs-bucket.sh lister  PROJECT SA_EMAIL                       # project-level storage.buckets.list, only for HBS 3
 #   gcs-bucket.sh hmac    PROJECT SA_EMAIL                       # HMAC key for S3-compatible clients (HBS 3, rclone s3 backend)
 #   gcs-bucket.sh show    BUCKET                                 # print the settings that matter, as evidence
 #   gcs-bucket.sh lock    BUCKET                                 # lock the retention policy. IRREVERSIBLE. Asks twice.
@@ -15,8 +16,9 @@
 # Why versioning plus retention: with Object Versioning on, a sync tool
 # can overwrite a changed file (the old version becomes noncurrent and
 # stays protected until its retention passes). Without versioning the
-# overwrite itself is refused with 403 retentionPolicyNotMet.
-# Source: https://docs.cloud.google.com/storage/docs/bucket-lock
+# overwrite itself is refused. Overwriting also needs
+# storage.objects.delete, which is why the upload role has it; see
+# iam/gcs-role.yaml. Source: https://docs.cloud.google.com/storage/docs/bucket-lock
 #
 # Needs gcloud (gcloud storage, not gsutil). POSIX sh.
 set -eu
@@ -51,10 +53,27 @@ cmd_sa() {
   gcloud iam service-accounts create "$sa" --project="$project" \
     --display-name="NAS offload writer" 2>/dev/null || true
   email="$sa@$project.iam.gserviceaccount.com"
-  # bind on the bucket only, not the project
-  gcloud storage buckets add-iam-policy-binding "gs://$bucket" \
-    --member="serviceAccount:$email" --role="projects/$project/roles/nasOffloadWriter"
-  printf 'service account %s bound to gs://%s with nasOffloadWriter (no delete)\n' "$email" "$bucket"
+  # bind on the bucket only, not the project. A new custom role takes a
+  # few seconds to become visible to the bucket ("does not exist in the
+  # resource's hierarchy"), so retry for up to a minute.
+  i=0
+  until gcloud storage buckets add-iam-policy-binding "gs://$bucket" \
+      --member="serviceAccount:$email" --role="projects/$project/roles/nasOffloadWriter" >/dev/null; do
+    i=$((i + 1)); [ "$i" -lt 6 ] || die "binding failed"
+    sleep 10
+  done
+  printf 'service account %s bound to gs://%s with nasOffloadWriter\n' "$email" "$bucket"
+}
+
+cmd_lister() {
+  project=$1; email=$2
+  need gcloud
+  gcloud iam roles create nasOffloadLister --project="$project" \
+    --file="$HERE/iam/gcs-lister-role.yaml" 2>/dev/null \
+    || gcloud iam roles update nasOffloadLister --project="$project" --file="$HERE/iam/gcs-lister-role.yaml"
+  gcloud projects add-iam-policy-binding "$project" --member="serviceAccount:$email" \
+    --role="projects/$project/roles/nasOffloadLister" --condition=None --format=none
+  printf '%s can list bucket names in %s (HBS 3 account validation)\n' "$email" "$project"
 }
 
 cmd_hmac() {
@@ -68,7 +87,7 @@ cmd_show() {
   bucket=$1
   need gcloud
   gcloud storage buckets describe "gs://$bucket" \
-    --format="yaml(location,storageClass,versioning_enabled,retentionPolicy,uniform_bucket_level_access,public_access_prevention,soft_delete_policy,lifecycle_config)"
+    --format="yaml(name,location,location_type,default_storage_class,versioning_enabled,retention_policy,uniform_bucket_level_access,public_access_prevention,soft_delete_policy,lifecycle_config)"
 }
 
 cmd_lock() {
@@ -83,11 +102,12 @@ cmd_lock() {
   printf 'locked\n'
 }
 
-[ $# -ge 2 ] || { sed -n '2,20p' "$0"; exit 1; }
+[ $# -ge 2 ] || { sed -n '2,22p' "$0"; exit 1; }
 cmd=$1; shift
 case "$cmd" in
   create) [ $# -ge 2 ] || die "create PROJECT BUCKET [REGION] [RETENTION]"; cmd_create "$@" ;;
   sa)     [ $# -eq 3 ] || die "sa PROJECT BUCKET SA_NAME"; cmd_sa "$@" ;;
+  lister) [ $# -eq 2 ] || die "lister PROJECT SA_EMAIL"; cmd_lister "$@" ;;
   hmac)   [ $# -eq 2 ] || die "hmac PROJECT SA_EMAIL"; cmd_hmac "$@" ;;
   show)   cmd_show "$1" ;;
   lock)   cmd_lock "$1" ;;

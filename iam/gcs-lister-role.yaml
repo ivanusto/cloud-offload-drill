@@ -1,0 +1,8 @@
+# Project-level role for clients that validate an S3-compatible account
+# with ListBuckets before they let you pick a bucket (HBS 3 does). It
+# shows bucket names in the project and nothing else.
+title: NAS offload bucket lister
+description: List bucket names only, for clients that validate with ListBuckets
+stage: GA
+includedPermissions:
+  - storage.buckets.list

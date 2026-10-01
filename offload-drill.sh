@@ -9,13 +9,15 @@
 #       is the end of the manifest check. If DST_DIR/canary/beats.log
 #       exists and nas-backup-drill is reachable, RPO comes from its
 #       share-canary.sh verify (CANARY_KIND=frozen).
-#   offload-drill.sh lock-test REMOTE:BUCKET/PREFIX/OBJECT [--label TEXT] [--gs gs://BUCKET/OBJECT]
+#   offload-drill.sh lock-test REMOTE:BUCKET/PREFIX/OBJECT [--label TEXT] [--gs gs://BUCKET/OBJECT | --s3 BUCKET/OBJECT]
 #       tries to delete one object with the remote's identity. PASS means
 #       the data survived: the delete was refused, or on a versioned
 #       bucket the object only became noncurrent and is still kept.
 #       With --gs, gcloud (whoever it is logged in as) also tries to
 #       delete one generation outright, which is what a retention policy
 #       really has to refuse, and gcloud decides whether data survived.
+#       --s3 does the same on an S3 endpoint with Object Lock through the
+#       aws CLI (S3_ENDPOINT, AWS_* credentials): delete one version id.
 #       The refusal texts are the evidence.
 #   offload-drill.sh latency   REMOTE:BUCKET/PREFIX/OBJECT [--label TEXT] [--repeat N]
 #       time to first byte of one object (Archive and Coldline reads),
@@ -30,6 +32,7 @@ OUT=${OUT:-drills.jsonl}
 NBD=${NBD:-$(dirname "$0")/../nas-backup-drill}
 RCLONE=${RCLONE:-rclone}
 GCLOUD=${GCLOUD:-gcloud}
+AWS=${AWS:-aws}
 
 die() { printf 'offload-drill: %s\n' "$*" >&2; exit 1; }
 now() { date -u +%s; }
@@ -44,9 +47,9 @@ remote_bytes() { "$RCLONE" size --json "$1" 2>/dev/null | sed -n 's/.*"bytes":\(
 mib() { echo $(( ${1:-0} / 1048576 )); }
 # rate MIB SECONDS -> "12.3 MiB/s"
 rate() { awk -v m="$1" -v s="$2" 'BEGIN { printf "%.1f MiB/s", m / s }'; }
-oneline() { tr -d '\n|"' | tail -c "${1:-160}"; }
+oneline() { tr -d '\n|"' | sed 's/ This command is authenticated.*//' | cut -c "1-${1:-240}"; }
 
-label=; failed_at=; manifest=; gs=; repeat=5
+label=; failed_at=; manifest=; gs=; s3=; repeat=5
 parse_opts() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -54,6 +57,7 @@ parse_opts() {
       --failed-at) failed_at=$2; shift 2 ;;
       --manifest) manifest=$2; shift 2 ;;
       --gs) gs=$2; shift 2 ;;
+      --s3) s3=$2; shift 2 ;;
       --repeat) repeat=$2; shift 2 ;;
       *) die "unknown option $1" ;;
     esac
@@ -76,7 +80,7 @@ cmd_upload() {
   "$RCLONE" sync "$src" "$dst" --stats-one-line --stats=30s --transfers=8 --checkers=8 >&2
   t1=$(now)
   b=$(remote_bytes "$dst"); s=$((t1 - t0)); [ "$s" -gt 0 ] || s=1
-  row "$t0" "${label:-upload}" "$dst" "$(mib "$b")" "$s" "$(rate "$(mib "$b")" "$s")" "-" "OK" "rclone sync, transfers=8"
+  row "$t0" "${label:-upload}" "$dst" "$(mib "$b")" "$s" "$(rate "$(mib "$b")" "$s")" "-" "OK" "rclone sync, transfers=8${RCLONE_S3_STORAGE_CLASS:+, class $RCLONE_S3_STORAGE_CLASS}"
 }
 
 cmd_restore() {
@@ -107,30 +111,59 @@ cmd_restore() {
   exit "$code"
 }
 
+# exists REMOTE:PATH: rclone lsf exits 0 for a missing file, so look at
+# the output instead
+exists() { [ -n "$("$RCLONE" lsf "$1" 2>/dev/null)" ]; }
+
+# kept_version REMOTE:DIR/NAME: a noncurrent version is listed by
+# --s3-versions with the timestamp before the extension,
+# payload-v2026-10-01-175716-142.bin for payload.bin
+kept_version() {
+  n=${1##*/}
+  case "$n" in
+    ?*.*) pat="^${n%.*}-v[0-9-]*\.${n##*.}\$" ;;
+    *) pat="^$n-v[0-9-]*\$" ;;
+  esac
+  "$RCLONE" lsf --s3-versions "${1%/*}" 2>/dev/null | grep -q "$pat"
+}
+
 # gens URI: generations of one GCS object, live and noncurrent
 gens() { "$GCLOUD" storage ls -a "$1" 2>/dev/null | sed -n 's/.*#\([0-9][0-9]*\)$/\1/p'; }
+
+# vers BUCKET/KEY: version ids of one S3 object (not delete markers)
+vers() {
+  "$AWS" ${S3_ENDPOINT:+--endpoint-url "$S3_ENDPOINT"} s3api list-object-versions \
+    --bucket "${1%%/*}" --prefix "${1#*/}" --query 'Versions[].[Key,VersionId]' --output text 2>/dev/null \
+    | awk -v k="${1#*/}" '$1 == k { print $2 }'
+}
 
 cmd_lock_test() {
   obj=$1; shift; parse_opts "$@"
   t0=$(now)
   if [ -n "$gs" ]; then before=$(gens "$gs"); [ -n "$before" ] || die "no generations at $gs"; fi
+  if [ -n "$s3" ]; then before=$(vers "$s3"); [ -n "$before" ] || die "no versions at $s3"; fi
   err=$("$RCLONE" deletefile "$obj" 2>&1 >/dev/null) && rc=0 || rc=$?
   if [ "$rc" -ne 0 ]; then a="delete refused: $(printf '%s' "$err" | oneline)"
   else a="delete returned 0"; fi
-  if [ -n "$gs" ]; then
+  if [ -n "$gs" ] || [ -n "$s3" ]; then
     g=$(printf '%s\n' "$before" | head -n 1)
-    gerr=$("$GCLOUD" storage rm "$gs#$g" 2>&1 >/dev/null) && grc=0 || grc=$?
+    if [ -n "$gs" ]; then
+      gerr=$("$GCLOUD" storage rm "$gs#$g" 2>&1 >/dev/null) && grc=0 || grc=$?
+    else
+      gerr=$("$AWS" ${S3_ENDPOINT:+--endpoint-url "$S3_ENDPOINT"} s3api delete-object \
+        --bucket "${s3%%/*}" --key "${s3#*/}" --version-id "$g" 2>&1 >/dev/null) && grc=0 || grc=$?
+    fi
     if [ "$grc" -ne 0 ]; then b="gen $g delete refused: $(printf '%s' "$gerr" | oneline)"
     else b="gen $g delete returned 0"; fi
-    after=$(gens "$gs")
+    if [ -n "$gs" ]; then after=$(gens "$gs"); else after=$(vers "$s3"); fi
     if printf '%s\n' "$after" | grep -qx "$g" && [ "$(printf '%s\n' "$after" | wc -l)" -ge "$(printf '%s\n' "$before" | wc -l)" ]; then
       res=OK; note="$a; $b; all $(printf '%s\n' "$after" | wc -l | tr -d ' ') generations kept"
     else
       res=FAIL; note="$a; $b; generations before: $(printf '%s' "$before" | tr '\n' ' ')after: $(printf '%s' "$after" | tr '\n' ' ')"
     fi
-  elif "$RCLONE" lsf "$obj" >/dev/null 2>&1; then
+  elif exists "$obj"; then
     res=OK; note="$a; current version still readable"
-  elif "$RCLONE" lsf --s3-versions "${obj%/*}" 2>/dev/null | grep -q "^${obj##*/}-v"; then
+  elif kept_version "$obj"; then
     res=OK; note="$a; current is gone but a noncurrent version is kept"
   else
     res=FAIL; note="$a; object is gone: the identity can delete, or retention is not in force"

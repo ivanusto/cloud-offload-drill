@@ -1,14 +1,21 @@
-# Custom role for the NAS upload identity. Create, read and list only.
-# No storage.objects.delete, no storage.objects.update (no overwrite of
-# metadata), no bucket or IAM permissions. With Object Versioning on,
-# "overwrite" is a create, so sync jobs still work; old versions are
-# kept and protected by the retention policy.
+# Custom role for the NAS upload identity. Create, read, list and delete
+# objects; no bucket settings and no IAM.
+#
+# delete is required: on Cloud Storage, overwriting an existing object
+# needs storage.objects.delete even with Object Versioning on (measured,
+# 403 AccessDenied on PutObject without it), so a sync job could never
+# update a changed file. The retention policy is what makes delete safe:
+# deleting a live object only turns it noncurrent, and deleting any
+# generation younger than the retention period is refused, for this
+# identity and for the project Owner alike. The protection window is the
+# retention period.
 title: NAS offload writer
-description: Upload and read objects, never delete them
+description: Upload, read and replace objects; retention keeps every version
 stage: GA
 includedPermissions:
   - storage.buckets.get
   - storage.objects.create
+  - storage.objects.delete
   - storage.objects.get
   - storage.objects.list
   - storage.multipartUploads.create

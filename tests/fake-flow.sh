@@ -23,13 +23,16 @@ case "$cmd" in
   sync|copy) src=$(p "$1"); dst=$(p "$2"); mkdir -p "$dst"; cp -r "$src"/. "$dst"/ ;;
   size) printf '{"count":3,"bytes":%s}\n' "$(du -sb "$(p "$2")" | cut -f1)" ;;
   lsf)
-    if [ "$1" = --s3-versions ]; then ls "$(p "$2")" "$FAKE_REMOTE/.versions" 2>/dev/null; else [ -e "$(p "$1")" ]; fi ;;
+    # like rclone: exit 0 and print nothing for a missing file
+    if [ "$1" = --s3-versions ]; then ls "$(p "$2")" "$FAKE_REMOTE/.versions" 2>/dev/null || true
+    elif [ -e "$(p "$1")" ]; then basename "$1"; fi ;;
   deletefile)
     f=$(p "$1")
     case "${FAKE_LOCK:-locked}" in
       locked) printf 'ERROR : %s: Failed to delete: 403 retentionPolicyNotMet\n' "$1" >&2; exit 1 ;;
-      marker) exit 0 ;;
-      noncurrent) mkdir -p "$FAKE_REMOTE/.versions"; mv "$f" "$FAKE_REMOTE/.versions/$(basename "$f")-v2026-10-02-000000-000" ;;
+      # S3 Object Lock and GCS versioning alike: the current version goes
+      # (delete marker or noncurrent), the data stays as an old version
+      marker|noncurrent) mkdir -p "$FAKE_REMOTE/.versions"; b=$(basename "$f"); mv "$f" "$FAKE_REMOTE/.versions/${b%.*}-v2026-10-02-000000-000.${b##*.}" ;;
       open) rm -f "$f" ;;
     esac ;;
   cat) head -c 1 "$(p "$1")" ;;
@@ -54,6 +57,32 @@ case "$1 $2 $3" in
 esac
 EOF
 chmod +x bin/gcloud
+
+# --- fake aws: versions of one key in $FAKE_REMOTE/.vers, one id per line
+cat > bin/aws <<'EOF'
+#!/bin/sh
+set -eu
+v="$FAKE_REMOTE/.vers"
+key=; vid=; op=
+while [ $# -gt 0 ]; do
+  case "$1" in
+    list-object-versions|delete-object) op=$1 ;;
+    --prefix|--key) key=$2; shift ;;
+    --version-id) vid=$2; shift ;;
+  esac
+  shift
+done
+case "$op" in
+  list-object-versions) while read -r id; do printf '%s\t%s\n' "$key" "$id"; done < "$v" ;;
+  delete-object)
+    case "${FAKE_GEN:-locked}" in
+      locked) printf 'An error occurred (AccessDenied) when calling the DeleteObject operation: forbidden by object lock\n' >&2; exit 254 ;;
+      open) sed -i "/^$vid\$/d" "$v" ;;
+    esac ;;
+  *) exit 2 ;;
+esac
+EOF
+chmod +x bin/aws
 
 pass=0; fail=0
 ok()   { pass=$((pass + 1)); printf 'ok   %s\n' "$1"; }
@@ -87,16 +116,25 @@ check "restore exits 4 on mismatch" '[ "$rc" -eq 4 ]'
 # --- lock-test
 check "lock-test PASS when delete is refused" 'FAKE_LOCK=locked "$HERE/offload-drill.sh" lock-test fake:bucket/drill/data/a.bin 2>/dev/null | grep -q "| OK |"'
 check "lock-test records the refusal text" 'grep -q "retentionPolicyNotMet" "$OUT"'
-check "lock-test PASS on delete marker (object still readable)" 'FAKE_LOCK=marker "$HERE/offload-drill.sh" lock-test fake:bucket/drill/data/a.bin 2>/dev/null | grep -q "| OK |"'
+check "lock-test PASS on delete marker (old version kept)" 'FAKE_LOCK=marker "$HERE/offload-drill.sh" lock-test fake:bucket/drill/data/a.bin 2>/dev/null | grep -q "| OK |.*noncurrent version is kept"'
+cp src/data/a.bin remote/bucket/drill/data/a.bin; rm -rf remote/.versions
 set +e; FAKE_LOCK=open "$HERE/offload-drill.sh" lock-test fake:bucket/drill/data/b.txt >/dev/null 2>&1; rc=$?; set -e
 check "lock-test FAIL when the object really goes away" '[ "$rc" -ne 0 ] && [ ! -f remote/bucket/drill/data/b.txt ]'
 
+rm -rf remote/.versions
 check "lock-test PASS when the object only becomes noncurrent" 'FAKE_LOCK=noncurrent "$HERE/offload-drill.sh" lock-test fake:bucket/drill/data/a.bin 2>/dev/null | grep -q "noncurrent version is kept"'
 cp src/data/a.bin remote/bucket/drill/data/a.bin
 printf '1001\n1002\n' > remote/.gens
 check "lock-test --gs PASS when the generation delete is refused" 'FAKE_LOCK=locked FAKE_GEN=locked "$HERE/offload-drill.sh" lock-test fake:bucket/drill/data/a.bin --gs gs://bucket/drill/data/a.bin 2>/dev/null | grep -q "| OK |.*gen 1001 delete refused.*2 generations kept"'
 set +e; FAKE_LOCK=locked FAKE_GEN=open "$HERE/offload-drill.sh" lock-test fake:bucket/drill/data/a.bin --gs gs://bucket/drill/data/a.bin >/dev/null 2>&1; rc=$?; set -e
 check "lock-test --gs FAIL when a generation really goes away" '[ "$rc" -ne 0 ] && [ "$(wc -l < remote/.gens)" -eq 1 ]'
+
+printf 'vA\nvB\n' > remote/.vers
+check "lock-test --s3 PASS when the version delete is refused" 'FAKE_LOCK=marker FAKE_GEN=locked "$HERE/offload-drill.sh" lock-test fake:bucket/drill/data/a.bin --s3 bucket/drill/data/a.bin 2>/dev/null | grep -q "| OK |.*gen vA delete refused: An error occurred (AccessDenied).*2 generations kept"'
+cp src/data/a.bin remote/bucket/drill/data/a.bin
+set +e; FAKE_LOCK=marker FAKE_GEN=open "$HERE/offload-drill.sh" lock-test fake:bucket/drill/data/a.bin --s3 bucket/drill/data/a.bin >/dev/null 2>&1; rc=$?; set -e
+check "lock-test --s3 FAIL when a version really goes away" '[ "$rc" -ne 0 ] && [ "$(wc -l < remote/.vers)" -eq 1 ]'
+cp src/data/a.bin remote/bucket/drill/data/a.bin
 
 # --- latency
 check "latency prints the median of N reads" '"$HERE/offload-drill.sh" latency fake:bucket/drill/data/a.bin --repeat 3 2>/dev/null | grep -q "first byte median [0-9]* ms of 3"'
@@ -105,7 +143,7 @@ check "upload rate has one decimal" 'grep -q "\"rate\":\"[0-9]*\.[0-9] MiB/s\"" 
 # --- cost model
 check "cost model runs on datasets.json" 'python3 "$HERE/offload-cost.py" | grep -q "HDP_Business | coldline"'
 check "cost model one-off" 'python3 "$HERE/offload-cost.py" one --gb 100 --files 10 | grep -q "| dataset | archive |"'
-check "jsonl has one record per drill" '[ "$(wc -l < "$OUT")" -eq 10 ]'
+check "jsonl has one record per drill" '[ "$(wc -l < "$OUT")" -eq 12 ]'
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
