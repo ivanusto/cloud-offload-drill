@@ -2,8 +2,9 @@
 # offload-drill: times the four things an off-site copy has to prove,
 # and prints one drill-log row plus a JSONL record for each.
 #
-#   offload-drill.sh upload    SRC_DIR REMOTE:BUCKET/PREFIX [--label TEXT]
-#       rclone sync, measures bytes and seconds, prints MiB/s
+#   offload-drill.sh upload    SRC_DIR REMOTE:BUCKET/PREFIX [--label TEXT] [--exclude PATTERN ...]
+#       rclone sync, measures bytes and seconds, prints MiB/s. --exclude
+#       is passed to rclone (repeatable), e.g. "verification_repository/**"
 #   offload-drill.sh restore   REMOTE:BUCKET/PREFIX DST_DIR --manifest FILE [--label TEXT] [--failed-at ISO]
 #       rclone copy back, then every file in the manifest is hashed; RTO
 #       is the end of the manifest check. If DST_DIR/canary/beats.log
@@ -49,7 +50,7 @@ mib() { echo $(( ${1:-0} / 1048576 )); }
 rate() { awk -v m="$1" -v s="$2" 'BEGIN { printf "%.1f MiB/s", m / s }'; }
 oneline() { tr -d '\n|"' | sed 's/ This command is authenticated.*//' | cut -c "1-${1:-240}"; }
 
-label=; failed_at=; manifest=; gs=; s3=; repeat=5
+label=; failed_at=; manifest=; gs=; s3=; repeat=5; excludes=
 parse_opts() {
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -59,6 +60,8 @@ parse_opts() {
       --gs) gs=$2; shift 2 ;;
       --s3) s3=$2; shift 2 ;;
       --repeat) repeat=$2; shift 2 ;;
+      --exclude) excludes="$excludes
+$2"; shift 2 ;;
       *) die "unknown option $1" ;;
     esac
   done
@@ -81,12 +84,16 @@ cmd_upload() {
   # "touched" with a server-side copy, which the upload role may not do;
   # rclone then falls back to comparing hashes
   rc=0
+  set --
+  while IFS= read -r x; do [ -n "$x" ] && set -- "$@" --exclude "$x"; done <<EOF
+$excludes
+EOF
   "$RCLONE" sync "$src" "$dst" --stats-one-line --stats=30s --transfers=8 --checkers=8 \
-    --no-update-modtime >&2 || rc=$?
+    --no-update-modtime "$@" >&2 || rc=$?
   t1=$(now)
   b=$(remote_bytes "$dst"); s=$((t1 - t0)); [ "$s" -gt 0 ] || s=1
   if [ "$rc" -eq 0 ]; then res=OK; else res="rclone rc=$rc"; fi
-  row "$t0" "${label:-upload}" "$dst" "$(mib "$b")" "$s" "$(rate "$(mib "$b")" "$s")" "-" "$res" "rclone sync, transfers=8${RCLONE_S3_STORAGE_CLASS:+, class $RCLONE_S3_STORAGE_CLASS}"
+  row "$t0" "${label:-upload}" "$dst" "$(mib "$b")" "$s" "$(rate "$(mib "$b")" "$s")" "-" "$res" "rclone sync, transfers=8${RCLONE_S3_STORAGE_CLASS:+, class $RCLONE_S3_STORAGE_CLASS}$(printf '%s' "$excludes" | tr '\n' ' ' | sed 's/^ */, exclude /; s/ *$//; s/^, exclude $//')"
   [ "$rc" -eq 0 ]
 }
 

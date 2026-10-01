@@ -20,7 +20,9 @@ set -eu
 p() { case "$1" in fake:*) printf '%s/%s' "$FAKE_REMOTE" "${1#fake:}" ;; *) printf '%s' "$1" ;; esac; }
 cmd=$1; shift
 case "$cmd" in
-  sync|copy) src=$(p "$1"); dst=$(p "$2"); mkdir -p "$dst"; cp -r "$src"/. "$dst"/ ;;
+  sync|copy)
+    src=$(p "$1"); dst=$(p "$2"); shift 2; mkdir -p "$dst"; cp -r "$src"/. "$dst"/
+    while [ $# -gt 0 ]; do [ "$1" = --exclude ] && rm -rf "$dst/${2%/\*\*}"; shift; done ;;
   size) printf '{"count":3,"bytes":%s}\n' "$(du -sb "$(p "$2")" | cut -f1)" ;;
   lsf)
     # like rclone: exit 0 and print nothing for a missing file
@@ -102,6 +104,9 @@ check "manifest has 2 files" '[ "$(wc -l < m.sha256)" -eq 2 ]'
 r=$("$HERE/offload-drill.sh" upload "$T/src" fake:bucket/drill --label up 2>/dev/null)
 check "upload prints an OK row with MiB/s" 'printf "%s" "$r" | grep -q "MiB/s" && printf "%s" "$r" | grep -q "| OK |"'
 check "upload landed in the fake remote" '[ -f remote/bucket/drill/data/a.bin ]'
+mkdir -p src2/keep src2/skip; printf k > src2/keep/f; printf s > src2/skip/f
+r=$("$HERE/offload-drill.sh" upload "$T/src2" fake:bucket/ex --exclude "skip/**" --label ex 2>/dev/null)
+check "upload passes --exclude to rclone and notes it" '[ -f remote/bucket/ex/keep/f ] && [ ! -e remote/bucket/ex/skip ] && printf "%s" "$r" | grep -q "exclude skip/\*\*"'
 
 # --- restore, intact
 r=$("$HERE/offload-drill.sh" restore fake:bucket/drill "$T/back" --manifest m.sha256 --label back 2>/dev/null)
@@ -143,7 +148,7 @@ check "upload rate has one decimal" 'grep -q "\"rate\":\"[0-9]*\.[0-9] MiB/s\"" 
 # --- cost model
 check "cost model runs on datasets.json" 'python3 "$HERE/offload-cost.py" | grep -q "HDP_Business | coldline"'
 check "cost model one-off" 'python3 "$HERE/offload-cost.py" one --gib 100 --files 10 | grep -q "| dataset | archive |"'
-check "jsonl has one record per drill" '[ "$(wc -l < "$OUT")" -eq 12 ]'
+check "jsonl has one record per drill" '[ "$(wc -l < "$OUT")" -eq 13 ]'
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]
