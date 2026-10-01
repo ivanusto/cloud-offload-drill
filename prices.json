@@ -1,0 +1,41 @@
+{
+  "_note": "USD. Every number has a source and a date. Re-check before quoting; prices change without notice.",
+  "wan": {
+    "upload_mbps": 500,
+    "note": "HiNet 500M/500M, measured 500 Mbps (Day 18 lab). Effective throughput assumed 85% of line rate for sustained object uploads.",
+    "efficiency": 0.85
+  },
+  "providers": {
+    "gcs": {
+      "name": "Google Cloud Storage",
+      "region": "asia-east1 (Changhua, Taiwan)",
+      "source": "https://cloud.google.com/storage/pricing",
+      "checked": "2026-10-02",
+      "egress_per_gb_tiers": [[1024, 0.12], [10240, 0.11], [null, 0.08]],
+      "egress_note": "Internet egress, worldwide destinations excluding China and Australia. Tiers per month, TiB boundaries.",
+      "classes": {
+        "standard": {"storage_per_gb_month": 0.020, "min_days": 0,   "retrieval_per_gb": 0.00, "class_a_per_1k": 0.005, "class_b_per_1k": 0.0004},
+        "nearline": {"storage_per_gb_month": 0.010, "min_days": 30,  "retrieval_per_gb": 0.01, "class_a_per_1k": 0.010, "class_b_per_1k": 0.001},
+        "coldline": {"storage_per_gb_month": 0.004, "min_days": 90,  "retrieval_per_gb": 0.02, "class_a_per_1k": 0.020, "class_b_per_1k": 0.01},
+        "archive":  {"storage_per_gb_month": 0.0012, "min_days": 365, "retrieval_per_gb": 0.05, "class_a_per_1k": 0.050, "class_b_per_1k": 0.05}
+      }
+    },
+    "linode": {
+      "name": "Akamai (Linode) Object Storage",
+      "region": "jp-osa (Osaka) or jp-tyo-3 (Tokyo), region availability 待查",
+      "source": "https://techdocs.akamai.com/cloud-computing/docs/object-storage-pricing (points to regional pricing pages); numbers below from https://vpsranking.com/object-storage/akamai/ and need checking against the official Asia-Pacific pricing page (待查)",
+      "checked": "2026-10-02",
+      "flat": {
+        "monthly_base": 5.00,
+        "included_gb": 250,
+        "included_egress_gb": 1024,
+        "storage_overage_per_gb_month": 0.02,
+        "egress_overage_per_gb": 0.005,
+        "requests": "no charge for API requests (official techdocs, may change for E3 endpoints no earlier than 2027-10-01)"
+      },
+      "classes": {
+        "standard": {"storage_per_gb_month": 0.02, "min_days": 0, "retrieval_per_gb": 0.0, "class_a_per_1k": 0.0, "class_b_per_1k": 0.0}
+      }
+    }
+  }
+}

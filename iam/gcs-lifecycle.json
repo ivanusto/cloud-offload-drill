@@ -1,0 +1,16 @@
+{
+  "rule": [
+    {
+      "action": {"type": "Delete"},
+      "condition": {"daysSinceNoncurrentTime": 30}
+    },
+    {
+      "action": {"type": "SetStorageClass", "storageClass": "COLDLINE"},
+      "condition": {"age": 0, "matchesPrefix": ["HDP_Business/", "JustBackup/"]}
+    },
+    {
+      "action": {"type": "SetStorageClass", "storageClass": "NEARLINE"},
+      "condition": {"age": 30, "matchesPrefix": ["Music/", "Wordpress/", "Container/"]}
+    }
+  ]
+}

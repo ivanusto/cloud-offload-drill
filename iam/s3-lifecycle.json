@@ -1,0 +1,16 @@
+{
+  "Rules": [
+    {
+      "ID": "expire-noncurrent-30d",
+      "Status": "Enabled",
+      "Filter": {},
+      "NoncurrentVersionExpiration": {"NoncurrentDays": 30}
+    },
+    {
+      "ID": "abort-incomplete-multipart",
+      "Status": "Enabled",
+      "Filter": {},
+      "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 2}
+    }
+  ]
+}

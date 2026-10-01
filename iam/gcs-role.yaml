@@ -1,0 +1,17 @@
+# Custom role for the NAS upload identity. Create, read and list only.
+# No storage.objects.delete, no storage.objects.update (no overwrite of
+# metadata), no bucket or IAM permissions. With Object Versioning on,
+# "overwrite" is a create, so sync jobs still work; old versions are
+# kept and protected by the retention policy.
+title: NAS offload writer
+description: Upload and read objects, never delete them
+stage: GA
+includedPermissions:
+  - storage.buckets.get
+  - storage.objects.create
+  - storage.objects.get
+  - storage.objects.list
+  - storage.multipartUploads.create
+  - storage.multipartUploads.list
+  - storage.multipartUploads.listParts
+  - storage.multipartUploads.abort

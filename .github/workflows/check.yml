@@ -1,0 +1,19 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck gcs-bucket.sh s3-bucket.sh offload-drill.sh tests/fake-flow.sh
+      - run: python3 -m unittest discover -s tests
+      - run: sh tests/fake-flow.sh
