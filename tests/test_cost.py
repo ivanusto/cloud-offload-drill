@@ -12,6 +12,11 @@ WAN = {"upload_mbps": 500, "efficiency": 0.85}
 
 
 class Egress(unittest.TestCase):
+    def test_free_tier(self):
+        tiers = [[100, 0.0], [1024, 0.12], [10240, 0.11], [None, 0.08]]
+        self.assertEqual(oc.egress_cost(5, tiers), 0.0)
+        self.assertAlmostEqual(oc.egress_cost(262, tiers), 162 * 0.12)
+
     def test_first_tier(self):
         self.assertAlmostEqual(oc.egress_cost(100, TIERS), 12.0)
 
@@ -35,14 +40,14 @@ class Upload(unittest.TestCase):
 
 class Rows(unittest.TestCase):
     def setUp(self):
-        self.prov = {"egress_per_gb_tiers": TIERS}
-        self.std = {"storage_per_gb_month": 0.02, "min_days": 0, "retrieval_per_gb": 0.0,
+        self.prov = {"egress_per_gib_tiers": TIERS}
+        self.std = {"storage_per_gib_month": 0.02, "min_days": 0, "retrieval_per_gib": 0.0,
                     "class_a_per_1k": 0.005, "class_b_per_1k": 0.0004}
-        self.arc = {"storage_per_gb_month": 0.0012, "min_days": 365, "retrieval_per_gb": 0.05,
+        self.arc = {"storage_per_gib_month": 0.0012, "min_days": 365, "retrieval_per_gib": 0.05,
                     "class_a_per_1k": 0.05, "class_b_per_1k": 0.05}
 
     def test_standard_simple(self):
-        ds = {"name": "x", "gb": 100, "files": 1000, "change_gb_month": 0, "change_files_month": 0}
+        ds = {"name": "x", "gib": 100, "files": 1000, "change_gib_month": 0, "change_files_month": 0}
         r = oc.class_row(ds, "standard", self.std, self.prov, WAN, 12, 1)
         self.assertAlmostEqual(r["storage"], 2.0)
         self.assertAlmostEqual(r["put"], 0.005)
@@ -50,7 +55,7 @@ class Rows(unittest.TestCase):
         self.assertAlmostEqual(r["total"], 24.0 + 0.005 + 12.0004)
 
     def test_archive_min_duration_billed(self):
-        ds = {"name": "x", "gb": 100, "files": 1000, "change_gb_month": 10, "change_files_month": 0}
+        ds = {"name": "x", "gib": 100, "files": 1000, "change_gib_month": 10, "change_files_month": 0}
         r = oc.class_row(ds, "archive", self.arc, self.prov, WAN, 12, 0)
         # churn: 10 GB * 0.0012 * (365/30) per month
         self.assertAlmostEqual(r["churn"], 10 * 0.0012 * 365 / 30)

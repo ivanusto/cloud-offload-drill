@@ -1,40 +1,41 @@
 {
-  "_note": "USD. Every number has a source and a date. Re-check before quoting; prices change without notice.",
+  "_note": "USD. Every number has a source and a date. Re-check before quoting; prices change without notice. Google prices are per GiB (the billing SKU unit is GiBy); Linode prices are per decimal GB.",
   "wan": {
     "upload_mbps": 500,
-    "note": "HiNet 500M/500M, measured 500 Mbps (Day 18 lab). Effective throughput assumed 85% of line rate for sustained object uploads.",
+    "note": "HiNet 500M/500M. Effective throughput assumed 85% of line rate for sustained object uploads; Day 18 drill 1 measured 58.2 to 59.7 MiB/s with rclone (about 98% of line rate), so 85% is conservative.",
     "efficiency": 0.85
   },
   "providers": {
     "gcs": {
       "name": "Google Cloud Storage",
       "region": "asia-east1 (Changhua, Taiwan)",
-      "source": "https://cloud.google.com/storage/pricing",
+      "source": "Cloud Billing Catalog API, service 95FF-2EF5-5EA1 (Cloud Storage), SKUs 'Standard Storage Asia Regional', 'Nearline/Coldline/Archive Storage Taiwan', 'Regional * Class A/B Operations', '* Data Retrieval', 'Download APAC'; human-readable page https://cloud.google.com/storage/pricing",
       "checked": "2026-10-02",
-      "egress_per_gb_tiers": [[1024, 0.12], [10240, 0.11], [null, 0.08]],
-      "egress_note": "Internet egress, worldwide destinations excluding China and Australia. Tiers per month, TiB boundaries.",
+      "egress_per_gib_tiers": [[100, 0.0], [1024, 0.12], [10240, 0.11], [null, 0.08]],
+      "egress_note": "SKU 'Download APAC' (destination in Asia, restore to Taiwan). First 100 GiB per month free, then 0.12 to 1 TiB, 0.11 to 10 TiB, 0.08 above. The free 100 GiB is per account per month, shared by every restore in that month.",
+      "ops_note": "Standard Class A has its first 5,000 operations a month free and Class B its first 50,000; not modelled.",
       "classes": {
-        "standard": {"storage_per_gb_month": 0.020, "min_days": 0,   "retrieval_per_gb": 0.00, "class_a_per_1k": 0.005, "class_b_per_1k": 0.0004},
-        "nearline": {"storage_per_gb_month": 0.010, "min_days": 30,  "retrieval_per_gb": 0.01, "class_a_per_1k": 0.010, "class_b_per_1k": 0.001},
-        "coldline": {"storage_per_gb_month": 0.004, "min_days": 90,  "retrieval_per_gb": 0.02, "class_a_per_1k": 0.020, "class_b_per_1k": 0.01},
-        "archive":  {"storage_per_gb_month": 0.0012, "min_days": 365, "retrieval_per_gb": 0.05, "class_a_per_1k": 0.050, "class_b_per_1k": 0.05}
+        "standard": {"storage_per_gib_month": 0.020, "min_days": 0,   "retrieval_per_gib": 0.00, "class_a_per_1k": 0.005, "class_b_per_1k": 0.0004},
+        "nearline": {"storage_per_gib_month": 0.010, "min_days": 30,  "retrieval_per_gib": 0.01, "class_a_per_1k": 0.010, "class_b_per_1k": 0.001},
+        "coldline": {"storage_per_gib_month": 0.005, "min_days": 90,  "retrieval_per_gib": 0.02, "class_a_per_1k": 0.020, "class_b_per_1k": 0.01},
+        "archive":  {"storage_per_gib_month": 0.0015, "min_days": 365, "retrieval_per_gib": 0.05, "class_a_per_1k": 0.050, "class_b_per_1k": 0.05}
       }
     },
     "linode": {
       "name": "Akamai (Linode) Object Storage",
-      "region": "jp-osa (Osaka) or jp-tyo-3 (Tokyo), region availability 待查",
-      "source": "https://techdocs.akamai.com/cloud-computing/docs/object-storage-pricing (points to regional pricing pages); numbers below from https://vpsranking.com/object-storage/akamai/ and need checking against the official Asia-Pacific pricing page (待查)",
+      "region": "jp-tyo-1 (Tokyo 3)",
+      "source": "flat rate: https://techdocs.akamai.com/cloud-computing/docs/getting-started-with-object-storage ('the $5 monthly flat rate (prorated) ... Billing for Object Storage starts when it is enabled on your account'); per-GB rates: https://www.akamai.com/cloud/pricing/asia-pacific (storage $0.02/GB, outbound $0.005/GB with the first 1TB free each month); 250 GB included with the flat rate per Akamai's object storage docs; no API request charges per https://techdocs.akamai.com/cloud-computing/docs/object-storage-pricing",
       "checked": "2026-10-02",
       "flat": {
         "monthly_base": 5.00,
         "included_gb": 250,
-        "included_egress_gb": 1024,
+        "included_egress_gb": 1000,
         "storage_overage_per_gb_month": 0.02,
         "egress_overage_per_gb": 0.005,
-        "requests": "no charge for API requests (official techdocs, may change for E3 endpoints no earlier than 2027-10-01)"
+        "requests": "no charge for API requests (official techdocs; per-request charges for E3 endpoints are being evaluated, not before 2027-10-01)"
       },
       "classes": {
-        "standard": {"storage_per_gb_month": 0.02, "min_days": 0, "retrieval_per_gb": 0.0, "class_a_per_1k": 0.0, "class_b_per_1k": 0.0}
+        "standard": {"storage_per_gib_month": 0.02147, "min_days": 0, "retrieval_per_gib": 0.0, "class_a_per_1k": 0.0, "class_b_per_1k": 0.0}
       }
     }
   }

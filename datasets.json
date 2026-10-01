@@ -1,10 +1,10 @@
 {
-  "_note": "Sizes from Day 17 nas-audit (2026-10-01). gb is decimal GB as billed. files and monthly change are estimates to be replaced by rclone size / HBS job logs (待測).",
+  "_note": "Sizes in GiB as billed. Music, Wordpress and Container are rclone size of the uploaded copy (Day 18 drill 1, 2026-10-02); HDP_Business is the share's used space (the upload runs as root and replaces it); the model libraries come from Day 17 nas-audit. Monthly change is an estimate to be replaced by a month of bucket metrics.",
   "datasets": [
-    {"name": "Public/Music",      "gb": 5.0,   "files": 1500,  "change_gb_month": 0.5,  "change_files_month": 100,  "mode": "offload"},
-    {"name": "Public/Wordpress",  "gb": 10.7,  "files": 400,   "change_gb_month": 2.0,  "change_files_month": 30,   "mode": "offload"},
-    {"name": "Container",         "gb": 22.5,  "files": 60000, "change_gb_month": 5.0,  "change_files_month": 5000, "mode": "offload"},
-    {"name": "HDP_Business",      "gb": 262.0, "files": 4400,  "change_gb_month": 40.0, "change_files_month": 300,  "mode": "offload"},
-    {"name": "AIModels + models + comfyui", "gb": 3100.0, "files": 20000, "change_gb_month": 0.0, "change_files_month": 0, "mode": "redownload"}
+    {"name": "Public/Music",      "gib": 4.72,   "files": 128,   "change_gib_month": 0.5,  "change_files_month": 20,   "mode": "offload"},
+    {"name": "Public/Wordpress",  "gib": 17.55,  "files": 31,    "change_gib_month": 2.0,  "change_files_month": 5,    "mode": "offload"},
+    {"name": "Container",         "gib": 10.50,  "files": 45042, "change_gib_month": 5.0,  "change_files_month": 5000, "mode": "offload"},
+    {"name": "HDP_Business",      "gib": 262.2,  "files": 4433,  "change_gib_month": 40.0, "change_files_month": 300,  "mode": "offload"},
+    {"name": "AIModels + models + comfyui", "gib": 2925.0, "files": 20000, "change_gib_month": 0.0, "change_files_month": 0, "mode": "redownload"}
   ]
 }

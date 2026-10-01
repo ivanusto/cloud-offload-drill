@@ -77,10 +77,17 @@ cmd_upload() {
   src=$1; dst=$2; shift 2; parse_opts "$@"
   [ -d "$src" ] || die "$src is not a directory"
   t0=$(now)
-  "$RCLONE" sync "$src" "$dst" --stats-one-line --stats=30s --transfers=8 --checkers=8 >&2
+  # --no-update-modtime: a file that changed only in mtime would be
+  # "touched" with a server-side copy, which the upload role may not do;
+  # rclone then falls back to comparing hashes
+  rc=0
+  "$RCLONE" sync "$src" "$dst" --stats-one-line --stats=30s --transfers=8 --checkers=8 \
+    --no-update-modtime >&2 || rc=$?
   t1=$(now)
   b=$(remote_bytes "$dst"); s=$((t1 - t0)); [ "$s" -gt 0 ] || s=1
-  row "$t0" "${label:-upload}" "$dst" "$(mib "$b")" "$s" "$(rate "$(mib "$b")" "$s")" "-" "OK" "rclone sync, transfers=8${RCLONE_S3_STORAGE_CLASS:+, class $RCLONE_S3_STORAGE_CLASS}"
+  if [ "$rc" -eq 0 ]; then res=OK; else res="rclone rc=$rc"; fi
+  row "$t0" "${label:-upload}" "$dst" "$(mib "$b")" "$s" "$(rate "$(mib "$b")" "$s")" "-" "$res" "rclone sync, transfers=8${RCLONE_S3_STORAGE_CLASS:+, class $RCLONE_S3_STORAGE_CLASS}"
+  [ "$rc" -eq 0 ]
 }
 
 cmd_restore() {

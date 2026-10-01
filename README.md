@@ -23,7 +23,7 @@
 ```sh
 ./offload-cost.py                                   # datasets.json，12 個月，1 次還原
 ./offload-cost.py --months 36 --restores 2
-./offload-cost.py one --gb 262 --files 4400 --change-gb 40
+./offload-cost.py one --gib 262 --files 4400 --change-gib 40
 ```
 
 建 bucket 與身分（GCS）：

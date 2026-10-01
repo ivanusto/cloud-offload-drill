@@ -142,7 +142,7 @@ check "upload rate has one decimal" 'grep -q "\"rate\":\"[0-9]*\.[0-9] MiB/s\"" 
 
 # --- cost model
 check "cost model runs on datasets.json" 'python3 "$HERE/offload-cost.py" | grep -q "HDP_Business | coldline"'
-check "cost model one-off" 'python3 "$HERE/offload-cost.py" one --gb 100 --files 10 | grep -q "| dataset | archive |"'
+check "cost model one-off" 'python3 "$HERE/offload-cost.py" one --gib 100 --files 10 | grep -q "| dataset | archive |"'
 check "jsonl has one record per drill" '[ "$(wc -l < "$OUT")" -eq 12 ]'
 
 printf '\n%s passed, %s failed\n' "$pass" "$fail"
