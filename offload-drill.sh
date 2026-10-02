@@ -48,7 +48,7 @@ remote_bytes() { "$RCLONE" size --json "$1" 2>/dev/null | sed -n 's/.*"bytes":\(
 mib() { echo $(( ${1:-0} / 1048576 )); }
 # rate MIB SECONDS -> "12.3 MiB/s"
 rate() { awk -v m="$1" -v s="$2" 'BEGIN { printf "%.1f MiB/s", m / s }'; }
-oneline() { tr -d '\n|"' | sed 's/ This command is authenticated.*//' | cut -c "1-${1:-240}"; }
+oneline() { tr -d '\n|"' | sed 's/ This command is authenticated.*//' | cut -c 1-240; }
 
 label=; failed_at=; manifest=; gs=; s3=; repeat=5; excludes=
 parse_opts() {
