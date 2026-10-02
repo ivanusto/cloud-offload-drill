@@ -77,7 +77,7 @@ S3_ENDPOINT=https://jp-tyo-1.linodeobjects.com \
 2. **HBS 3 的 Google Cloud Storage 連接器不收 HMAC**，只有 OAuth、P12 與 JSON 金鑰。要共用 HMAC 得選「S3 相容」，而 HBS 3 建帳戶時用 ListBuckets 驗證，上傳身分要另外在專案層級拿到 `storage.buckets.list`（`gcs-bucket.sh lister`），否則回 `cloud_unauthorized`。
 3. **GCS 經 S3 相容端點列得出舊版，讀不出來。** 回應裡沒有 VersionId，rclone 的 `--s3-versions` 能列名稱，取檔時回 object not found。回復 noncurrent 版本要用 `gcloud storage cp gs://BUCKET/KEY#GENERATION`。S3 Object Lock（Linode）用 rclone `--s3-versions` 就能取回。
 4. **`rclone lsf` 對不存在的檔案也回 0。** `lock-test` 判斷物件還在不在，看的是輸出而不是結束碼。
-5. **稀疏檔會被整個傳上去。** HDP_Business 的 VM 磁碟映像在 ZFS 上用 262 GiB，表面大小 901 GiB，rclone 照傳，上傳 4.4 小時、費用乘上 3.4。HBS 3 的雲端同步也沒有稀疏檔偵測。上傳前先比 `du` 與 `du --apparent-size`。
+5. **稀疏檔會被整個傳上去。** HDP_Business 的 VM 磁碟映像在 ZFS 上用 262 GiB，表面大小 901 GiB，rclone 照傳，上傳 4.4 小時。容量是 3.4 倍（901 對 262 GiB），Coldline 一年費用是 3.7 倍（約 $176 對 $48）：儲存費跟著容量走，還原的流出費在每月前 100 GiB 免費之後才開始算，所以漲得更多。HBS 3 的雲端同步也沒有稀疏檔偵測。上傳前先比 `du` 與 `du --apparent-size`。
 
 ## 結束碼
 

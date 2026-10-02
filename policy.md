@@ -15,7 +15,7 @@ Day 17 的 3-2-1 對照表留下兩個紅燈，異地的 1 與不可變的 1。�
 | Public/Music | 4.7 GiB，128 檔 | Standard，30 天後 Nearline | 約 $0.7 到 $1.3 | 上雲 | 唯一副本，小，整份做還原演練。還原一次的流出落在每月 100 GiB 免費額度內 |
 | Public/Wordpress | 17.6 GiB，31 檔 | 同上 | 約 $2.5 到 $4.7 | 上雲 | 唯一副本 |
 | Container | 10.5 GiB，45,042 檔 | Standard，30 天後 Nearline | 約 $3.1 到 $4.3 | 上雲 | 唯一副本。檔案多，Archive 的首次 PUT 就要 $2.25，全年 $9.32，是 Nearline 的三倍 |
-| HDP_Business | 901 GiB 上傳（ZFS 用量 262 GiB） | Coldline | 約 $176 | 上雲 | 唯一副本。VM 磁碟映像是稀疏檔，rclone 把零照傳，費用是 262 GiB 時（約 $48）的 3.7 倍。一次還原時 Archive 便宜約 $9，兩次還原就翻轉；Coldline 最低保存 90 天 |
+| HDP_Business | 901 GiB 上傳（ZFS 用量 262 GiB） | Coldline | 約 $176 | 上雲 | 唯一副本。VM 磁碟映像是稀疏檔，rclone 把零照傳，容量是 3.4 倍，一年費用是 262 GiB 時（約 $48）的 3.7 倍，差在還原的流出費（見下方「稀疏檔」）。一次還原時 Archive 便宜約 $9，兩次還原就翻轉；Coldline 最低保存 90 天 |
 | JustBackup | 258 GB | 不上雲 | 0 | 不上雲 | HDP_Business 的第二套，Day 17 已在次要 NAS 單碟池 |
 | AIModels、models、comfyui | 約 2.9 TiB | 不上雲 | 0（重下載） | 重下載計畫 | 放 Archive 一年約 $53，取回一次約 $466。見 `redownload-plan.md` |
 
@@ -64,7 +64,7 @@ Day 17 的 3-2-1 對照表留下兩個紅燈，異地的 1 與不可變的 1。�
 - 取回費加流出費。GCS Archive 取回 $0.05/GiB，流出到亞太每月前 100 GiB 免費、之後 $0.12/GiB，2.9 TiB 拿回來一次約 $466。
 - 軟刪除（soft delete）。GCS 預設保留已刪除物件 7 天並計費，與保留政策重疊，`gcs-bucket.sh create` 設為 0。
 - 小檔案的時間成本。大檔每秒約 59 MiB，接近 500 Mbps 線速；Container 的 4.5 萬個小檔只有每秒 14.8 MiB。
-- 稀疏檔。HDP_Business 的 VM 磁碟映像在 ZFS 上用 262 GiB，表面大小 901 GiB，rclone 全部照傳，上傳 4.4 小時，儲存費與還原費都乘上 3.4。上傳前先比 `du` 與 `du --apparent-size`。
+- 稀疏檔。HDP_Business 的 VM 磁碟映像在 ZFS 上用 262 GiB，表面大小 901 GiB，rclone 全部照傳，上傳 4.4 小時。容量與儲存費是 3.4 倍（901 對 262 GiB；Coldline 每月 $4.51 對 $1.31），還原一次的費用約 4.6 倍（$114 對 $25，流出每月前 100 GiB 免費，超過才計費），合計一年費用 3.7 倍（約 $176 對 $48）。上傳前先比 `du` 與 `du --apparent-size`。
 - 大檔的前置雜湊。rclone 分段上傳前先把整個檔案讀完算 MD5，這段時間 NFS 讀 400 MiB/s 以上、上傳接近 0，看起來像卡住。
 - 價格頁的數字不一定是你的區域。asia-east1 的 Coldline 是 $0.005、Archive 是 $0.0015，比常被引用的美國區域價格高兩成五；計價單位是 GiB。
 
