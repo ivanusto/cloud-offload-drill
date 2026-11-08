@@ -2,3 +2,6 @@ drills.jsonl
 *.sha256
 *.json.key
 __pycache__/
+
+# Claude Code per-user permissions (may contain secrets)
+.claude/settings.local.json
